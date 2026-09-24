@@ -13,6 +13,7 @@ flowchart LR
             UI[UI service\nNode.js + Express\nPort 3000]
             Auth[Auth service\nGo + Gin\nPort 8080]
             Weather[Weather service\nPython + Flask\nPort 5000]
+            Redis[(Redis cache\nPort 6379)]
             DB[(MySQL database\nPort 3306\nVolume: db-data)]
         end
     end
@@ -23,8 +24,13 @@ flowchart LR
     UI -->|Login / signup requests| Auth
     Auth -->|Create users / validate credentials| DB
     UI -->|Weather request by city| Weather
+    Weather -->|Check cached city weather| Redis
+    Redis -->|Cache miss / expired data| Weather
     Weather -->|API request with APIKEY| WeatherAPI
+    Weather -->|Store fresh city weather| Redis
 ```
+
+Redis is shown in the flow as the caching layer students should consider for the weather feature. CI/CD tooling such as GitLab is not part of the required runtime flow; students can document or extend CI/CD choices at their own discretion.
 
 ## Services
 
@@ -33,6 +39,7 @@ flowchart LR
 | ui | Node.js / Express | Web interface, login, signup, weather search | 3000 | 3000 |
 | auth | Go / Gin | User registration, login, JWT generation | 8080 | Not exposed |
 | weather | Python / Flask | Gets weather data from RapidAPI Weather API | 5000 | Not exposed |
+| redis | Redis | Cache layer for weather results or temporary data | 6379 | Not exposed |
 | db | MySQL | Stores users for the auth service | 3306 | Not exposed |
 
 ## Prerequisites
@@ -102,7 +109,7 @@ Students must document:
 - the ports;
 - the environment variables;
 - the network;
-- the volume used by MySQL.
+- the volumes used by MySQL and Redis if configured.
 
 ### 3. Configure secrets and environment variables
 
@@ -164,7 +171,7 @@ docker compose up -d
 docker compose -f dc ps
 ```
 
-Expected result: the `ui`, `auth`, `weather`, and `db` services should be running.
+Expected result: the `ui`, `auth`, `weather`, `redis`, and `db` services should be running if Redis is included in the Compose file.
 
 ### 7. Check logs
 
@@ -178,6 +185,7 @@ To check one service only:
 docker compose -f dc logs -f ui
 docker compose -f dc logs -f auth
 docker compose -f dc logs -f weather
+docker compose -f dc logs -f redis
 docker compose -f dc logs -f db
 ```
 

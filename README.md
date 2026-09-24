@@ -66,17 +66,8 @@ docker compose version
 ├── UI/                 # Node.js frontend service
 ├── auth/               # Go authentication service
 ├── weather/            # Python weather API service
-├── dc                  # Docker Compose file used in this repository
 └── README.md           # Project instructions
 ```
-
-Note: in this repository the Compose file is named `dc`. If your instructor asks you to use the default Compose name, copy it to `docker-compose.yml`:
-
-```bash
-cp dc docker-compose.yml
-```
-
-Then you can use `docker compose up` without `-f dc`.
 
 ## Deployment instructions with Docker Compose
 
@@ -94,13 +85,17 @@ cd carles-weatherapp
 git pull
 ```
 
-### 2. Review the Compose file
+### 2. Create the Compose file from scratch
 
-Open the Compose file and identify all services:
+There is no ready-made Compose file in this repository. Students must create their own `docker-compose.yml` from scratch at the project root.
 
-```bash
-cat dc
-```
+The file must define the following services:
+
+- `ui`, built from `./UI`;
+- `auth`, built from `./auth`;
+- `weather`, built from `./weather`;
+- `db`, using a MySQL image;
+- `redis`, using a Redis image, when implementing the cache layer shown in the architecture.
 
 Students must document:
 
@@ -139,13 +134,7 @@ environment:
 
 ### 4. Build the containers
 
-Because the Compose file is named `dc`, run:
-
-```bash
-docker compose -f dc build
-```
-
-If you renamed/copied it to `docker-compose.yml`, run:
+After creating `docker-compose.yml`, build the application images:
 
 ```bash
 docker compose build
@@ -153,13 +142,7 @@ docker compose build
 
 ### 5. Start the application
 
-Using the current file name:
-
-```bash
-docker compose -f dc up -d
-```
-
-Or with `docker-compose.yml`:
+Run the stack with Docker Compose:
 
 ```bash
 docker compose up -d
@@ -168,7 +151,7 @@ docker compose up -d
 ### 6. Check running containers
 
 ```bash
-docker compose -f dc ps
+docker compose ps
 ```
 
 Expected result: the `ui`, `auth`, `weather`, `redis`, and `db` services should be running if Redis is included in the Compose file.
@@ -176,17 +159,17 @@ Expected result: the `ui`, `auth`, `weather`, `redis`, and `db` services should 
 ### 7. Check logs
 
 ```bash
-docker compose -f dc logs -f
+docker compose logs -f
 ```
 
 To check one service only:
 
 ```bash
-docker compose -f dc logs -f ui
-docker compose -f dc logs -f auth
-docker compose -f dc logs -f weather
-docker compose -f dc logs -f redis
-docker compose -f dc logs -f db
+docker compose logs -f ui
+docker compose logs -f auth
+docker compose logs -f weather
+docker compose logs -f redis
+docker compose logs -f db
 ```
 
 ### 8. Test the application in a browser
@@ -216,25 +199,25 @@ curl -i http://localhost:3000/health
 Auth service from inside the Docker network:
 
 ```bash
-docker compose -f dc exec ui sh -c "wget -qO- http://auth:8080/ || true"
+docker compose exec ui sh -c "wget -qO- http://auth:8080/ || true"
 ```
 
 Weather service from inside the Docker network:
 
 ```bash
-docker compose -f dc exec ui sh -c "wget -qO- http://weather:5000/Douala || true"
+docker compose exec ui sh -c "wget -qO- http://weather:5000/Douala || true"
 ```
 
 ### 10. Stop the application
 
 ```bash
-docker compose -f dc down
+docker compose down
 ```
 
 To remove containers and the MySQL data volume:
 
 ```bash
-docker compose -f dc down -v
+docker compose down -v
 ```
 
 Warning: `down -v` deletes the database volume. Use it only when you want to reset all local data.
@@ -253,14 +236,15 @@ The report must include:
 2. Operating system used.
 3. Docker and Docker Compose versions.
 4. Repository clone command.
-5. Any changes made to environment variables.
-6. Build command used.
-7. Start command used.
-8. Output of `docker compose ps`.
-9. Screenshots or copied output showing the app running.
-10. Problems faced and how they were solved.
-11. Final test results.
-12. Cleanup command used.
+5. The complete `docker-compose.yml` they wrote.
+6. Any changes made to environment variables.
+7. Build command used.
+8. Start command used.
+9. Output of `docker compose ps`.
+10. Screenshots or copied output showing the app running.
+11. Problems faced and how they were solved.
+12. Final test results.
+13. Cleanup command used.
 
 Example structure:
 
@@ -280,12 +264,13 @@ docker compose version
 
 ## Steps performed
 1. Cloned the repository.
-2. Reviewed the Compose file.
+2. Created and reviewed `docker-compose.yml`.
 3. Configured API key.
-4. Built the images.
-5. Started the services.
-6. Tested the UI.
-7. Checked logs.
+4. Documented the Compose services, networks, ports and volumes.
+5. Built the images.
+6. Started the services.
+7. Tested the UI.
+8. Checked logs.
 
 ## Evidence
 Paste command outputs and screenshots here.
@@ -301,7 +286,7 @@ State whether the deployment worked.
 
 ### Port 3000 is already in use
 
-Change the host port in `dc`:
+Change the host port in `docker-compose.yml`:
 
 ```yaml
 ports:
@@ -328,8 +313,8 @@ WEATHER_PORT: 5000
 Then restart:
 
 ```bash
-docker compose -f dc down
-docker compose -f dc up -d --build
+docker compose down
+docker compose up -d --build
 ```
 
 ### Weather search does not work
@@ -337,7 +322,7 @@ docker compose -f dc up -d --build
 Check the API key:
 
 ```bash
-docker compose -f dc logs weather
+docker compose logs weather
 ```
 
 Make sure `APIKEY` is valid and has access to the RapidAPI Weather API.
@@ -347,8 +332,8 @@ Make sure `APIKEY` is valid and has access to the RapidAPI Weather API.
 Check the database logs:
 
 ```bash
-docker compose -f dc logs db
-docker compose -f dc logs auth
+docker compose logs db
+docker compose logs auth
 ```
 
 Make sure these values match:

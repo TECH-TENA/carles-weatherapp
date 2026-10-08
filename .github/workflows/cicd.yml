@@ -1,0 +1,105 @@
+name: Weather App Docker Compose CI/CD
+
+on:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+
+jobs:
+  compose-ci:
+    name: Build and test Docker Compose stack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create CI environment file
+        run: |
+          {
+            echo "APIKEY=${RAPIDAPI_KEY:-dummy-ci-key}"
+            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
+          } > .env
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+
+      - name: Validate Docker Compose file
+        run: docker compose config --quiet
+
+      - name: Build Docker Compose images
+        run: docker compose build
+
+      - name: Start Docker Compose stack
+        run: docker compose up -d
+
+      - name: Wait for services to become healthy
+        run: |
+          for attempt in $(seq 1 30); do
+            unhealthy_count="$(docker compose ps --format json | jq -r 'select(.Health != "" and .Health != "healthy") | .Service' | wc -l)"
+            running_count="$(docker compose ps --services --filter status=running | wc -l)"
+
+            docker compose ps
+
+            if [ "$unhealthy_count" -eq 0 ] && [ "$running_count" -ge 5 ]; then
+              echo "All services are running and healthy."
+              exit 0
+            fi
+
+            echo "Waiting for services to become healthy... attempt ${attempt}/30"
+            sleep 10
+          done
+
+          echo "Services did not become healthy in time."
+          docker compose logs
+          exit 1
+
+      - name: Test UI health endpoint
+        run: curl --fail --show-error --silent http://localhost:3000/health
+
+      - name: Show service status
+        if: always()
+        run: docker compose ps
+
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop Docker Compose stack
+        if: always()
+        run: docker compose down -v
+
+  compose-deploy:
+    name: Deploy with Docker Compose
+    runs-on: self-hosted
+    needs: compose-ci
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create deployment environment file
+        run: |
+          {
+            echo "APIKEY=${RAPIDAPI_KEY}"
+            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
+          } > .env
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+
+      - name: Deploy Docker Compose stack
+        run: docker compose up -d --build
+
+      - name: Show deployed services
+        run: docker compose ps

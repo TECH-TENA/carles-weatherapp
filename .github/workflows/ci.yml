@@ -16,14 +16,15 @@ env:
   APP_LABEL: demo
   DOCKERHUB_USERNAME: s5carles
   IMAGE_TAG: ${{ github.sha }}
+  DOCKER_HOST: unix:///var/run/docker.sock
 
 jobs:
   # ═══════════════════════════════════════════════════════════
-  # JOB 1 — Build & push images to Dockerhub
+  # JOB 1 — Build & Push to Docker Hub
   # ═══════════════════════════════════════════════════════════
   build-and-push:
     name: Build & Push to Docker Hub
-    runs-on: demo
+    runs-on: [self-hosted, demo]
 
     permissions:
       contents: read
@@ -32,34 +33,90 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Docker & Compose
+      # ─────────────────────────────────────────────
+      # 1. INSTALL DOCKER + COMPOSE IF MISSING
+      # ─────────────────────────────────────────────
+      - name: Ensure Docker & Compose are installed
+        run: |
+          set -e
+
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            echo "✅ Docker & Compose already installed"
+            docker --version
+            docker compose version
+            exit 0
+          fi
+
+          echo "⚠️  Docker or Compose missing — installing from official repo..."
+
+          # Install prerequisites
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+          # Add Docker's official GPG key
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+          # Add the Docker repo
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+            https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # Install Docker Engine + Compose plugin + Buildx
+          sudo apt-get update
+          sudo apt-get install -y \
+            docker-ce \
+            docker-ce-cli \
+            containerd.io \
+            docker-buildx-plugin \
+            docker-compose-plugin
+
+          # Enable + start Docker
+          sudo systemctl enable docker
+          sudo systemctl start docker
+
+          # Verify
+          docker --version
+          docker compose version
+          echo "✅ Docker & Compose installed successfully"
+
+      # ─────────────────────────────────────────────
+      # 2. FIX DOCKER SOCKET PERMISSIONS
+      # ─────────────────────────────────────────────
+      - name: Fix Docker socket permissions
+        run: |
+          echo "== Current user & groups =="
+          whoami
+          id
+
+          sudo usermod -aG docker "$USER" || true
+          sudo chown root:docker /var/run/docker.sock || true
+          sudo chmod 660 /var/run/docker.sock || true
+
+          ls -l /var/run/docker.sock || true
+
+      - name: Verify Docker & Compose access
         run: |
           docker --version
           docker compose version
+          docker info > /dev/null && echo "✅ Docker daemon accessible"
+          docker ps && echo "✅ Docker socket accessible"
 
       # ─────────────────────────────────────────────
-      # Authenticate to Docker Hub
-      # Uses: username (s5carles) + access token
+      # 3. AUTHENTICATE TO DOCKER HUB
       # ─────────────────────────────────────────────
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          # If you'd rather use a token-only flow, set:
-          # username: ${{ secrets.DOCKERHUB_USERNAME }}
-          # password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Verify Docker Hub login
-        run: |
-          echo "Logged in as: $(docker info | grep -i 'Username' || echo unknown)"
-          docker info | grep -i 'Registry' || true
 
       # ─────────────────────────────────────────────
-      # Build all service images with proper tags
-      #   s5carles/ui:latest      + s5carles/ui:<sha>
-      #   s5carles/auth:latest    + s5carles/auth:<sha>
-      #   s5carles/weather:latest + s5carles/weather:<sha>
+      # 4. BUILD WITH TAGS
       # ─────────────────────────────────────────────
       - name: Build UI image
         run: |
@@ -83,31 +140,24 @@ jobs:
             ./weather
 
       # ─────────────────────────────────────────────
-      # Push all tags
+      # 5. PUSH TO DOCKER HUB
       # ─────────────────────────────────────────────
-      - name: Push UI images
+      - name: Push all images
         run: |
           docker push ${{ env.DOCKERHUB_USERNAME }}/ui:latest
           docker push ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }}
-
-      - name: Push Auth images
-        run: |
           docker push ${{ env.DOCKERHUB_USERNAME }}/auth:latest
           docker push ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }}
-
-      - name: Push Weather images
-        run: |
           docker push ${{ env.DOCKERHUB_USERNAME }}/weather:latest
           docker push ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }}
 
       - name: Show pushed images
         run: |
-          echo "✅ Pushed:"
           docker images --filter "reference=${{ env.DOCKERHUB_USERNAME }}/*" \
             --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
   # ═══════════════════════════════════════════════════════════
-  # JOB 2 — Deploy the stack using the pushed images
+  # JOB 2 — Deploy
   # ═══════════════════════════════════════════════════════════
   deploy:
     name: Deploy Demo Stack
@@ -121,25 +171,82 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Docker & Compose
+      # ─────────────────────────────────────────────
+      # 1. INSTALL DOCKER + COMPOSE IF MISSING
+      # ─────────────────────────────────────────────
+      - name: Ensure Docker & Compose are installed
+        run: |
+          set -e
+
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            echo "✅ Docker & Compose already installed"
+            docker --version
+            docker compose version
+            exit 0
+          fi
+
+          echo "⚠️  Docker or Compose missing — installing from official repo..."
+
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+            https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            docker-ce \
+            docker-ce-cli \
+            containerd.io \
+            docker-buildx-plugin \
+            docker-compose-plugin
+
+          sudo systemctl enable docker
+          sudo systemctl start docker
+
+          docker --version
+          docker compose version
+          echo "✅ Docker & Compose installed successfully"
+
+      # ─────────────────────────────────────────────
+      # 2. FIX DOCKER SOCKET PERMISSIONS
+      # ─────────────────────────────────────────────
+      - name: Fix Docker socket permissions
+        run: |
+          whoami
+          id
+          sudo usermod -aG docker "$USER" || true
+          sudo chown root:docker /var/run/docker.sock || true
+          sudo chmod 660 /var/run/docker.sock || true
+          ls -l /var/run/docker.sock || true
+
+      - name: Verify Docker & Compose access
         run: |
           docker --version
           docker compose version
+          docker info > /dev/null && echo "✅ Docker daemon accessible"
+          docker ps && echo "✅ Docker socket accessible"
 
-      - name: Configure Docker permissions
-        run: |
-          if ! id -nG "$USER" | grep -qw docker; then
-            sudo usermod -aG docker "$USER" || true
-          fi
-          sudo chmod 666 /var/run/docker.sock || true
-          docker info
-
+      # ─────────────────────────────────────────────
+      # 3. LOG IN TO DOCKER HUB
+      # ─────────────────────────────────────────────
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # ─────────────────────────────────────────────
+      # 4. WRITE .env FROM SECRETS
+      # ─────────────────────────────────────────────
       - name: Write .env file
         run: |
           cat <<EOF > .env

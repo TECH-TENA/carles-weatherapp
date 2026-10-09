@@ -1,27 +1,20 @@
 services:
 
-  # ─────────────────────────────────────────────
-  # UI Service (frontend)
-  # ─────────────────────────────────────────────
   ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    image: demo-ui:${IMAGE_TAG:-latest}
+    image: ${DOCKERHUB_USERNAME:-s5carles}/ui:${IMAGE_TAG:-latest}
     container_name: demo-ui
     restart: unless-stopped
     ports:
-      - "3000:3000"          # adjust to the port your UI listens on
+      - "3000:3000"
     environment:
       AUTH_HOST: auth
       AUTH_PORT: 8080
       WEATHER_HOST: weather
       WEATHER_PORT: 5000
       REDIS_USER: redis
-      REDIS_PASSWORD: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
     labels:
       - "app=demo"
-      - "com.demo.managed=true"
       - "com.demo.service=ui"
     depends_on:
       auth:
@@ -33,27 +26,19 @@ services:
     networks:
       - demo-net
 
-  # ─────────────────────────────────────────────
-  # Auth Service
-  # ─────────────────────────────────────────────
   auth:
-    build:
-      context: ./auth
-      dockerfile: Dockerfile
-    image: demo-auth:${IMAGE_TAG:-latest}
+    image: ${DOCKERHUB_USERNAME:-s5carles}/auth:${IMAGE_TAG:-latest}
     container_name: demo-auth
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
       DB_HOST: db
-      DB_PASSWORD: my-secret-pw
-      # If your auth service also uses these, they're ready:
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_USER: redis
-      REDIS_PASSWORD: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
     labels:
       - "app=demo"
-      - "com.demo.managed=true"
       - "com.demo.service=auth"
     depends_on:
       db:
@@ -61,36 +46,26 @@ services:
     networks:
       - demo-net
 
-  # ─────────────────────────────────────────────
-  # Weather Service
-  # ─────────────────────────────────────────────
   weather:
-    build:
-      context: ./weather
-      dockerfile: Dockerfile
-    image: demo-weather:${IMAGE_TAG:-latest}
+    image: ${DOCKERHUB_USERNAME:-s5carles}/weather:${IMAGE_TAG:-latest}
     container_name: demo-weather
     restart: unless-stopped
     ports:
       - "5000:5000"
     environment:
-      APIKEY: ecbc396f46mshb65cbb1f82cf334p1fcc87jsna5e962a3c542
+      APIKEY: ${WEATHER_APIKEY}
     labels:
       - "app=demo"
-      - "com.demo.managed=true"
       - "com.demo.service=weather"
     networks:
       - demo-net
 
-  # ─────────────────────────────────────────────
-  # Database Service (MySQL)
-  # ─────────────────────────────────────────────
   db:
     image: mysql:8.0
     container_name: demo-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: my-secret-pw
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: demo
     ports:
       - "3306:3306"
@@ -98,10 +73,9 @@ services:
       - db-data:/var/lib/mysql
     labels:
       - "app=demo"
-      - "com.demo.managed=true"
       - "com.demo.service=db"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pmy-secret-pw"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -109,46 +83,35 @@ services:
     networks:
       - demo-net
 
-  # ─────────────────────────────────────────────
-  # Redis Service
-  # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: demo-redis
     restart: unless-stopped
     command: >
       redis-server
-      --requirepass redis
-      --user redis on >redis ~* +@all
+      --requirepass ${REDIS_PASSWORD:-redis}
+      --user redis on >${REDIS_PASSWORD:-redis} ~* +@all
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
     labels:
       - "app=demo"
-      - "com.demo.managed=true"
       - "com.demo.service=redis"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
     networks:
       - demo-net
 
-# ─────────────────────────────────────────────
-# Named Volumes
-# ─────────────────────────────────────────────
 volumes:
   db-data:
     name: demo-db-data
   redis-data:
     name: demo-redis-data
 
-# ─────────────────────────────────────────────
-# Networks
-# ─────────────────────────────────────────────
 networks:
   demo-net:
     name: demo-net

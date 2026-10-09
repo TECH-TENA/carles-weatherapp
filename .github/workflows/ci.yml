@@ -1,0 +1,206 @@
+name: Deploy Demo Stack
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo-stack
+  cancel-in-progress: false
+
+env:
+  COMPOSE_PROJECT_NAME: demo
+  COMPOSE_FILE: docker-compose.yml
+  APP_LABEL: demo
+  DOCKERHUB_USERNAME: s5carles
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # ═══════════════════════════════════════════════════════════
+  # JOB 1 — Build & push images to Docker Hub
+  # ═══════════════════════════════════════════════════════════
+  build-and-push:
+    name: Build & Push to Docker Hub
+    runs-on: [self-hosted, demo]
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Docker & Compose
+        run: |
+          docker --version
+          docker compose version
+
+      # ─────────────────────────────────────────────
+      # Authenticate to Docker Hub
+      # Uses: username (s5carles) + access token
+      # ─────────────────────────────────────────────
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          # If you'd rather use a token-only flow, set:
+          # username: ${{ secrets.DOCKERHUB_USERNAME }}
+          # password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify Docker Hub login
+        run: |
+          echo "Logged in as: $(docker info | grep -i 'Username' || echo unknown)"
+          docker info | grep -i 'Registry' || true
+
+      # ─────────────────────────────────────────────
+      # Build all service images with proper tags
+      #   s5carles/ui:latest      + s5carles/ui:<sha>
+      #   s5carles/auth:latest    + s5carles/auth:<sha>
+      #   s5carles/weather:latest + s5carles/weather:<sha>
+      # ─────────────────────────────────────────────
+      - name: Build UI image
+        run: |
+          docker build \
+            -t ${{ env.DOCKERHUB_USERNAME }}/ui:latest \
+            -t ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }} \
+            ./ui
+
+      - name: Build Auth image
+        run: |
+          docker build \
+            -t ${{ env.DOCKERHUB_USERNAME }}/auth:latest \
+            -t ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }} \
+            ./auth
+
+      - name: Build Weather image
+        run: |
+          docker build \
+            -t ${{ env.DOCKERHUB_USERNAME }}/weather:latest \
+            -t ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }} \
+            ./weather
+
+      # ─────────────────────────────────────────────
+      # Push all tags
+      # ─────────────────────────────────────────────
+      - name: Push UI images
+        run: |
+          docker push ${{ env.DOCKERHUB_USERNAME }}/ui:latest
+          docker push ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }}
+
+      - name: Push Auth images
+        run: |
+          docker push ${{ env.DOCKERHUB_USERNAME }}/auth:latest
+          docker push ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }}
+
+      - name: Push Weather images
+        run: |
+          docker push ${{ env.DOCKERHUB_USERNAME }}/weather:latest
+          docker push ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }}
+
+      - name: Show pushed images
+        run: |
+          echo "✅ Pushed:"
+          docker images --filter "reference=${{ env.DOCKERHUB_USERNAME }}/*" \
+            --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+
+  # ═══════════════════════════════════════════════════════════
+  # JOB 2 — Deploy the stack using the pushed images
+  # ═══════════════════════════════════════════════════════════
+  deploy:
+    name: Deploy Demo Stack
+    needs: build-and-push
+    runs-on: [self-hosted, demo]
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Docker & Compose
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Configure Docker permissions
+        run: |
+          if ! id -nG "$USER" | grep -qw docker; then
+            sudo usermod -aG docker "$USER" || true
+          fi
+          sudo chmod 666 /var/run/docker.sock || true
+          docker info
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Write .env file
+        run: |
+          cat <<EOF > .env
+          DOCKERHUB_USERNAME=${{ env.DOCKERHUB_USERNAME }}
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          APP_LABEL=demo
+          MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+          WEATHER_APIKEY=${{ secrets.WEATHER_APIKEY }}
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          EOF
+
+      - name: Validate compose file
+        run: docker compose -p demo -f docker-compose.yml config
+
+      - name: Tear down existing stack
+        run: |
+          docker compose -p demo -f docker-compose.yml down --remove-orphans || true
+
+      - name: Pull latest images from Docker Hub
+        run: |
+          docker compose -p demo -f docker-compose.yml pull --ignore-pull-failures || true
+
+      - name: Deploy stack
+        run: |
+          docker compose -p demo -f docker-compose.yml up -d --remove-orphans
+
+      - name: Wait for services
+        run: |
+          sleep 15
+          docker compose -p demo -f docker-compose.yml ps
+
+      - name: Health check (UI)
+        run: |
+          for i in {1..12}; do
+            if curl -fsS http://localhost:3000/ > /dev/null; then
+              echo "✅ UI healthy"; exit 0
+            fi
+            echo "⏳ UI attempt $i..."; sleep 5
+          done
+          echo "❌ UI health check failed"; exit 1
+
+      - name: Health check (Auth)
+        run: |
+          for i in {1..12}; do
+            if curl -fsS http://localhost:8080/health > /dev/null; then
+              echo "✅ Auth healthy"; exit 0
+            fi
+            echo "⏳ Auth attempt $i..."; sleep 5
+          done
+          echo "❌ Auth health check failed"; exit 1
+
+      - name: Show running containers
+        if: always()
+        run: |
+          docker ps --filter "label=app=demo" \
+            --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -p demo -f docker-compose.yml logs --tail=200
+
+      - name: Prune old images
+        if: always()
+        run: docker image prune -f

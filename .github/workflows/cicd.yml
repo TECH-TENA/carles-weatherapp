@@ -25,10 +25,15 @@ jobs:
 
       - name: Create CI environment file
         run: |
+          APIKEY_VALUE="${RAPIDAPI_KEY:-dummy-ci-key}"
+          MYSQL_ROOT_PASSWORD_VALUE="${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
+
+          printf "APIKEY=%s\nMYSQL_ROOT_PASSWORD=%s\n" "$APIKEY_VALUE" "$MYSQL_ROOT_PASSWORD_VALUE" > .env
+
           {
-            echo "APIKEY=${RAPIDAPI_KEY:-dummy-ci-key}"
-            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
-          } > .env
+            echo "APIKEY=${APIKEY_VALUE}"
+            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD_VALUE}"
+          } >> "$GITHUB_ENV"
         env:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
@@ -92,10 +97,15 @@ jobs:
 
       - name: Create deployment environment file
         run: |
+          APIKEY_VALUE="${RAPIDAPI_KEY:-dummy-ci-key}"
+          MYSQL_ROOT_PASSWORD_VALUE="${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
+
+          printf "APIKEY=%s\nMYSQL_ROOT_PASSWORD=%s\n" "$APIKEY_VALUE" "$MYSQL_ROOT_PASSWORD_VALUE" > .env
+
           {
-            echo "APIKEY=${RAPIDAPI_KEY:-dummy-ci-key}"
-            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-weatherapp-root-password}"
-          } > .env
+            echo "APIKEY=${APIKEY_VALUE}"
+            echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD_VALUE}"
+          } >> "$GITHUB_ENV"
         env:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}

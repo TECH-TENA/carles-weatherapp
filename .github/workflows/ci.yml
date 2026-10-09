@@ -16,11 +16,10 @@ env:
   APP_LABEL: demo
   DOCKERHUB_USERNAME: s5carles
   IMAGE_TAG: ${{ github.sha }}
-  DOCKER_HOST: unix:///var/run/docker.sock
 
 jobs:
   # ═══════════════════════════════════════════════════════════
-  # JOB 1 — Build & Push to Docker Hub
+  # JOB 1 — Build & Push
   # ═══════════════════════════════════════════════════════════
   build-and-push:
     name: Build & Push to Docker Hub
@@ -33,128 +32,102 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # 1. INSTALL DOCKER + COMPOSE IF MISSING
-      # ─────────────────────────────────────────────
       - name: Ensure Docker & Compose are installed
         run: |
           set -e
-
-          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+          if command -v docker >/dev/null 2>&1 && sudo docker compose version >/dev/null 2>&1; then
             echo "✅ Docker & Compose already installed"
             docker --version
-            docker compose version
+            sudo docker compose version
             exit 0
           fi
 
-          echo "⚠️  Docker or Compose missing — installing from official repo..."
-
-          # Install prerequisites
+          echo "⚠️  Installing Docker & Compose..."
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl gnupg lsb-release
-
-          # Add Docker's official GPG key
           sudo install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
             sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-          # Add the Docker repo
           echo \
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
             https://download.docker.com/linux/ubuntu \
             $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-          # Install Docker Engine + Compose plugin + Buildx
           sudo apt-get update
           sudo apt-get install -y \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
-
-          # Enable + start Docker
+            docker-ce docker-ce-cli containerd.io \
+            docker-buildx-plugin docker-compose-plugin
           sudo systemctl enable docker
           sudo systemctl start docker
 
-          # Verify
           docker --version
-          docker compose version
-          echo "✅ Docker & Compose installed successfully"
+          sudo docker compose version
 
-      # ─────────────────────────────────────────────
-      # 2. FIX DOCKER SOCKET PERMISSIONS
-      # ─────────────────────────────────────────────
-      - name: Fix Docker socket permissions
+      - name: Ensure Docker daemon is running & accessible
         run: |
-          echo "== Current user & groups =="
           whoami
           id
 
-          sudo usermod -aG docker "$USER" || true
+          if ! sudo systemctl is-active --quiet docker; then
+            echo "⚠️  Starting Docker daemon..."
+            sudo systemctl start docker
+          fi
+          sudo systemctl enable docker || true
+
+          for i in {1..10}; do
+            [ -S /var/run/docker.sock ] && break
+            echo "⏳ Waiting for docker.sock ... ($i)"
+            sleep 1
+          done
+
           sudo chown root:docker /var/run/docker.sock || true
           sudo chmod 660 /var/run/docker.sock || true
-
+          sudo usermod -aG docker "$USER" || true
           ls -l /var/run/docker.sock || true
 
-      - name: Verify Docker & Compose access
+      - name: Verify Docker access
         run: |
-          docker --version
-          docker compose version
-          docker info > /dev/null && echo "✅ Docker daemon accessible"
-          docker ps && echo "✅ Docker socket accessible"
+          sudo docker --version
+          sudo docker compose version
+          sudo docker info | head -20
+          sudo docker ps
+          echo "✅ Docker daemon and socket are accessible"
 
-      # ─────────────────────────────────────────────
-      # 3. AUTHENTICATE TO DOCKER HUB
-      # ─────────────────────────────────────────────
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
+            sudo docker login -u "${{ env.DOCKERHUB_USERNAME }}" --password-stdin
 
-      # ─────────────────────────────────────────────
-      # 4. BUILD WITH TAGS
-      # ─────────────────────────────────────────────
       - name: Build UI image
         run: |
-          docker build \
+          sudo docker build \
             -t ${{ env.DOCKERHUB_USERNAME }}/ui:latest \
             -t ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }} \
             ./ui
 
       - name: Build Auth image
         run: |
-          docker build \
+          sudo docker build \
             -t ${{ env.DOCKERHUB_USERNAME }}/auth:latest \
             -t ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }} \
             ./auth
 
       - name: Build Weather image
         run: |
-          docker build \
+          sudo docker build \
             -t ${{ env.DOCKERHUB_USERNAME }}/weather:latest \
             -t ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }} \
             ./weather
 
-      # ─────────────────────────────────────────────
-      # 5. PUSH TO DOCKER HUB
-      # ─────────────────────────────────────────────
       - name: Push all images
         run: |
-          docker push ${{ env.DOCKERHUB_USERNAME }}/ui:latest
-          docker push ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }}
-          docker push ${{ env.DOCKERHUB_USERNAME }}/auth:latest
-          docker push ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }}
-          docker push ${{ env.DOCKERHUB_USERNAME }}/weather:latest
-          docker push ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }}
-
-      - name: Show pushed images
-        run: |
-          docker images --filter "reference=${{ env.DOCKERHUB_USERNAME }}/*" \
-            --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/ui:latest
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }}
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/auth:latest
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/auth:${{ env.IMAGE_TAG }}
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/weather:latest
+          sudo docker push ${{ env.DOCKERHUB_USERNAME }}/weather:${{ env.IMAGE_TAG }}
 
   # ═══════════════════════════════════════════════════════════
   # JOB 2 — Deploy
@@ -171,82 +144,69 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # 1. INSTALL DOCKER + COMPOSE IF MISSING
-      # ─────────────────────────────────────────────
       - name: Ensure Docker & Compose are installed
         run: |
           set -e
-
-          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+          if command -v docker >/dev/null 2>&1 && sudo docker compose version >/dev/null 2>&1; then
             echo "✅ Docker & Compose already installed"
             docker --version
-            docker compose version
+            sudo docker compose version
             exit 0
           fi
 
-          echo "⚠️  Docker or Compose missing — installing from official repo..."
-
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl gnupg lsb-release
-
           sudo install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
             sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
           echo \
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
             https://download.docker.com/linux/ubuntu \
             $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
           sudo apt-get update
           sudo apt-get install -y \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
-
+            docker-ce docker-ce-cli containerd.io \
+            docker-buildx-plugin docker-compose-plugin
           sudo systemctl enable docker
           sudo systemctl start docker
 
           docker --version
-          docker compose version
-          echo "✅ Docker & Compose installed successfully"
+          sudo docker compose version
 
-      # ─────────────────────────────────────────────
-      # 2. FIX DOCKER SOCKET PERMISSIONS
-      # ─────────────────────────────────────────────
-      - name: Fix Docker socket permissions
+      - name: Ensure Docker daemon is running & accessible
         run: |
           whoami
           id
-          sudo usermod -aG docker "$USER" || true
+
+          if ! sudo systemctl is-active --quiet docker; then
+            sudo systemctl start docker
+          fi
+          sudo systemctl enable docker || true
+
+          for i in {1..10}; do
+            [ -S /var/run/docker.sock ] && break
+            sleep 1
+          done
+
           sudo chown root:docker /var/run/docker.sock || true
           sudo chmod 660 /var/run/docker.sock || true
+          sudo usermod -aG docker "$USER" || true
           ls -l /var/run/docker.sock || true
 
-      - name: Verify Docker & Compose access
+      - name: Verify Docker access
         run: |
-          docker --version
-          docker compose version
-          docker info > /dev/null && echo "✅ Docker daemon accessible"
-          docker ps && echo "✅ Docker socket accessible"
+          sudo docker --version
+          sudo docker compose version
+          sudo docker info | head -20
+          sudo docker ps
 
-      # ─────────────────────────────────────────────
-      # 3. LOG IN TO DOCKER HUB
-      # ─────────────────────────────────────────────
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
+            sudo docker login -u "${{ env.DOCKERHUB_USERNAME }}" --password-stdin
 
-      # ─────────────────────────────────────────────
-      # 4. WRITE .env FROM SECRETS
-      # ─────────────────────────────────────────────
       - name: Write .env file
         run: |
           cat <<EOF > .env
@@ -259,24 +219,24 @@ jobs:
           EOF
 
       - name: Validate compose file
-        run: docker compose -p demo -f docker-compose.yml config
+        run: sudo docker compose -p demo -f docker-compose.yml config
 
       - name: Tear down existing stack
         run: |
-          docker compose -p demo -f docker-compose.yml down --remove-orphans || true
+          sudo docker compose -p demo -f docker-compose.yml down --remove-orphans || true
 
-      - name: Pull latest images from Docker Hub
+      - name: Pull latest images
         run: |
-          docker compose -p demo -f docker-compose.yml pull --ignore-pull-failures || true
+          sudo docker compose -p demo -f docker-compose.yml pull --ignore-pull-failures || true
 
       - name: Deploy stack
         run: |
-          docker compose -p demo -f docker-compose.yml up -d --remove-orphans
+          sudo docker compose -p demo -f docker-compose.yml up -d --remove-orphans
 
       - name: Wait for services
         run: |
           sleep 15
-          docker compose -p demo -f docker-compose.yml ps
+          sudo docker compose -p demo -f docker-compose.yml ps
 
       - name: Health check (UI)
         run: |
@@ -301,13 +261,13 @@ jobs:
       - name: Show running containers
         if: always()
         run: |
-          docker ps --filter "label=app=demo" \
+          sudo docker ps --filter "label=app=demo" \
             --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 
-      - name: Dump logs on failures
+      - name: Dump logs on failure
         if: failure()
-        run: docker compose -p demo -f docker-compose.yml logs --tail=200
+        run: sudo docker compose -p demo -f docker-compose.yml logs --tail=200
 
       - name: Prune old images
         if: always()
-        run: docker image prune -f
+        run: sudo docker image prune -f

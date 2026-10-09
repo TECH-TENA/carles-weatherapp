@@ -304,7 +304,7 @@ jobs:
           docker ps --filter "label=app=demo" \
             --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 
-      - name: Dump logs on failure
+      - name: Dump logs on failures
         if: failure()
         run: docker compose -p demo -f docker-compose.yml logs --tail=200
 

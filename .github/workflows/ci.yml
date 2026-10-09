@@ -104,7 +104,7 @@ jobs:
           sudo docker build \
             -t ${{ env.DOCKERHUB_USERNAME }}/ui:latest \
             -t ${{ env.DOCKERHUB_USERNAME }}/ui:${{ env.IMAGE_TAG }} \
-            ./ui
+            ./UI
 
       - name: Build Auth image
         run: |

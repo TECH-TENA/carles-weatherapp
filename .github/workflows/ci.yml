@@ -19,11 +19,11 @@ env:
 
 jobs:
   # ═══════════════════════════════════════════════════════════
-  # JOB 1 — Build & push images to Docker Hub
+  # JOB 1 — Build & push images to Dockerhub
   # ═══════════════════════════════════════════════════════════
   build-and-push:
     name: Build & Push to Docker Hub
-    runs-on: [self-hosted, demo]
+    runs-on: demo
 
     permissions:
       contents: read

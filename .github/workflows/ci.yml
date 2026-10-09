@@ -12,7 +12,7 @@ concurrency:
 
 env:
   COMPOSE_PROJECT_NAME: demo
-  COMPOSE_FILE: docker-compose.yml
+  COMPOSE_FILE: compose.yml
   APP_LABEL: demo
   DOCKERHUB_USERNAME: s5carles
   IMAGE_TAG: ${{ github.sha }}
@@ -56,8 +56,8 @@ jobs:
             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y \
-            docker-ce docker-ce-cli containerd.io \
-            docker-buildx-plugin docker-compose-plugin
+            ce ce-cli containerd.io \
+            buildx-plugin compose-plugin
           sudo systemctl enable docker
           sudo systemctl start docker
 
@@ -167,8 +167,8 @@ jobs:
             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y \
-            docker-ce docker-ce-cli containerd.io \
-            docker-buildx-plugin docker-compose-plugin
+            ce ce-cli containerd.io \
+            buildx-plugin compose-plugin
           sudo systemctl enable docker
           sudo systemctl start docker
 
@@ -219,24 +219,24 @@ jobs:
           EOF
 
       - name: Validate compose file
-        run: sudo docker compose -p demo -f docker-compose.yml config
+        run: sudo docker compose -p demo -f compose.yml config
 
       - name: Tear down existing stack
         run: |
-          sudo docker compose -p demo -f docker-compose.yml down --remove-orphans || true
+          sudo docker compose -p demo -f compose.yml down --remove-orphans || true
 
       - name: Pull latest images
         run: |
-          sudo docker compose -p demo -f docker-compose.yml pull --ignore-pull-failures || true
+          sudo docker compose -p demo -f compose.yml pull --ignore-pull-failures || true
 
       - name: Deploy stack
         run: |
-          sudo docker compose -p demo -f docker-compose.yml up -d --remove-orphans
+          sudo docker compose -p demo -f compose.yml up -d --remove-orphans
 
       - name: Wait for services
         run: |
           sleep 15
-          sudo docker compose -p demo -f docker-compose.yml ps
+          sudo docker compose -p demo -f compose.yml ps
 
       - name: Health check (UI)
         run: |
@@ -266,7 +266,7 @@ jobs:
 
       - name: Dump logs on failure
         if: failure()
-        run: sudo docker compose -p demo -f docker-compose.yml logs --tail=200
+        run: sudo docker compose -p demo -f compose.yml logs --tail=200
 
       - name: Prune old images
         if: always()

@@ -1,0 +1,33 @@
+
+name: Petclinic CI
+
+on:
+  push:
+    branches:
+      - main
+      - feature/weather-app-practice
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and build Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Docker Compose configuration
+        run: docker compose config -q
+
+      - name: Build Docker image
+        run: docker build -t petclinic:ci .

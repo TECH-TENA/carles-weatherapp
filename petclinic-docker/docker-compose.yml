@@ -1,0 +1,191 @@
+
+name: petclinic
+
+services:
+
+  petclinic:
+    build:
+      context: .
+      dockerfile: Dockerfile.multi
+    image: petclinic:1.0
+    ports:
+      - "8000:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: mysql
+      SERVER_PORT: "8080"
+      MYSQL_URL: jdbc:mysql://mysqlserver:3306/petclinic
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysqlserver:3306/petclinic
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+    depends_on:
+      mysqlserver:
+        condition: service_healthy
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.6
+    restart: unless-stopped
+
+  mysqlserver:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - mysql_config:/etc/mysql/conf.d
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD="$${MYSQL_PASSWORD}" mysqladmin ping -h 127.0.0.1 -u "$${MYSQL_USER}" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.2
+    restart: unless-stopped
+
+  redis-0:
+    image: redis:7.4
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /data/redis.conf ]; then
+          cp /etc/redis/redis.conf /data/redis.conf
+        fi
+        exec redis-server /data/redis.conf
+    volumes:
+      - ./redis/redis-0.conf:/etc/redis/redis.conf:ro
+      - redis0_data:/data
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.3
+    restart: unless-stopped
+
+  redis-1:
+    image: redis:7.4
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /data/redis.conf ]; then
+          cp /etc/redis/redis.conf /data/redis.conf
+        fi
+        exec redis-server /data/redis.conf
+    volumes:
+      - ./redis/redis-1.conf:/etc/redis/redis.conf:ro
+      - redis1_data:/data
+    depends_on:
+      - redis-0
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.5
+    restart: unless-stopped
+
+  redis-2:
+    image: redis:7.4
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /data/redis.conf ]; then
+          cp /etc/redis/redis.conf /data/redis.conf
+        fi
+        exec redis-server /data/redis.conf
+    volumes:
+      - ./redis/redis-2.conf:/etc/redis/redis.conf:ro
+      - redis2_data:/data
+    depends_on:
+      - redis-0
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.4
+    restart: unless-stopped
+
+  sentinel-01:
+    image: redis:7.4
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /sentinel-data/sentinel.conf ]; then
+          cp /etc/redis/sentinel.conf /sentinel-data/sentinel.conf
+        fi
+        exec redis-sentinel /sentinel-data/sentinel.conf
+    volumes:
+      - ./sentinel/sentinel-01.conf:/etc/redis/sentinel.conf:ro
+      - sentinel01_data:/sentinel-data
+    depends_on:
+      - redis-0
+      - redis-1
+      - redis-2
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.8
+    restart: unless-stopped
+
+  sentinel-02:
+    image: redis:7.4
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /sentinel-data/sentinel.conf ]; then
+          cp /etc/redis/sentinel.conf /sentinel-data/sentinel.conf
+        fi
+        exec redis-sentinel /sentinel-data/sentinel.conf
+    volumes:
+      - ./sentinel/sentinel-02.conf:/etc/redis/sentinel.conf:ro
+      - sentinel02_data:/sentinel-data
+    depends_on:
+      - redis-0
+      - redis-1
+      - redis-2
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.7
+    restart: unless-stopped
+
+  sentinel-03:
+    image: redis:7.4
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /sentinel-data/sentinel.conf ]; then
+          cp /etc/redis/sentinel.conf /sentinel-data/sentinel.conf
+        fi
+        exec redis-sentinel /sentinel-data/sentinel.conf
+    volumes:
+      - ./sentinel/sentinel-03.conf:/etc/redis/sentinel.conf:ro
+      - sentinel03_data:/sentinel-data
+    depends_on:
+      - redis-0
+      - redis-1
+      - redis-2
+    networks:
+      petclinic-network:
+        ipv4_address: 172.21.0.9
+    restart: unless-stopped
+
+networks:
+  petclinic-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1
+
+volumes:
+  mysql_data:
+  mysql_config:
+  redis0_data:
+  redis1_data:
+  redis2_data:
+  sentinel01_data:
+  sentinel02_data:
+  sentinel03_data:
